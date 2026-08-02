@@ -11,18 +11,18 @@ hypernetwork masks + IoU head). `export_sam.py` extracts weights from `mobile_sa
 Bugs found: MLP hidden dim is 2048 (not 4*E); layer-0 self-attn has no residual (queries replaced);
 two-way MLP uses ReLU (not GELU).
 
-## ⏭ Stage 2 — image encoders
+## ✅ Stage 2 — image encoders (TinyViT DONE 2026-08-02; ViT-B pending)
 - **MobileSAM TinyViT** (~6M): conv stem (patch_embed) → 4 stages (MBConv blocks + windowed attention
   with attention_biases + patch merging) → neck → [1,256,64,64]. New ops: MBConv (depthwise-sep, have
   conv2d groups), attention with a learned relative-bias table, windowing. Parity vs PyTorch.
 - **SAM ViT-B** (91M): plain ViT (16x16 patch, 1024 input), windowed attn + decomposed rel-pos, neck.
   Reuses the depth_anything DINOv2 ViT ops closely.
 
-## ⏭ Stage 3 — end-to-end inference
+## ✅ Stage 3 — end-to-end inference (DONE 2026-08-02, validated vs SamPredictor)
 CLI: image → resize/pad 1024 → encoder → embedding → point/box → `sam_decode` → mask → overlay PNG.
 (Preprocessing: ResizeLongestSide to 1024 + pad; the SAM pixel mean/std normalization.)
 
-## ⏭ Stage 4 — WASM interactive demo
+## ✅ Stage 4 — WASM click-to-segment demo (DONE 2026-08-02)
 Encoder runs once per image (heavy), decoder per click (cheap, ~ms). Click → segment. Ship fp16.
 
 ## ⏭ Stage 5 — training (focal + dice mask loss + IoU MSE) ; Stage 6 — GPU (cuBLAS seam)

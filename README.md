@@ -13,12 +13,20 @@ The prompt encoder + mask decoder are **shared across all variants**; only the i
 
 Reference = `mobile_sam.pt` (TinyViT encoder + SAM's original prompt encoder + mask decoder, ~10M).
 
-## Status — building the shared decoder first
-1. shared **prompt encoder + mask decoder** → parity vs PyTorch  ← in progress
-2. image encoders: MobileSAM TinyViT + SAM ViT-B → embedding parity
-3. end-to-end inference (image + click → mask overlay)
-4. WASM interactive demo (encoder once → decoder per click)
-5. training (focal + dice + IoU) ; 6. GPU (cuBLAS seam)
+## 🖱️ Live demo — [**yomei-o.github.io/segment_anything_cpp/wasm/**](https://yomei-o.github.io/segment_anything_cpp/wasm/)
+Pick an image → **Encode** (runs the ViT encoder once, in-browser) → **click any object** to segment it.
+Pure C++ → WebAssembly, no server, no upload. Ships fp16 weights (~22 MB).
+
+## Status — MobileSAM complete (matches PyTorch)
+1. ✅ shared **prompt encoder + mask decoder** — parity vs PyTorch (masks 7.8e-5, IoU 4.5e-7)
+2. ✅ **TinyViT image encoder** — final embedding **2.86e-6 MATCH** (SAM ViT-B: pending)
+3. ✅ **end-to-end inference** (`pure/infer_sam.cpp`) — validated vs PyTorch SamPredictor (IoU + mask area identical)
+4. ✅ **WASM click-to-segment demo** (`wasm/`) — encode once (~15–60 s), decode per click (~2–3 s)
+5. ⏭ training (focal + dice + IoU) ; 6. ⏭ GPU (cuBLAS seam) ; SAM ViT-B encoder (the 91M variant)
+
+Build (weights: `python pure/ref/export_sam.py && python pure/ref/export_tinyvit.py` first, needs
+`mobile_sam.pt`): `cl /std:c++20 /O2 /EHsc /Zc:preprocessor /DNOMINMAX /Ipure\third_party pure\infer_sam.cpp`
+then `infer_sam <img> <x> <y> [out.png]` (x,y = click in original pixels).
 
 Shared engine reused from depth_anything_cpp: `autograd/backend/ops2d/linalg/bn/optim/depth_ops/
 face_ops/...` + stb + flat Eigen. SAM-specific: `sam_ops.hpp`, `net_sam.hpp`, `pure/ref/*`.

@@ -1,0 +1,6 @@
+embed_dim 256
+image_embed 64
+input_image 1024
+num_mask_tokens 4
+heads 8
+tf_depth 2
