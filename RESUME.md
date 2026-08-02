@@ -25,7 +25,18 @@ CLI: image → resize/pad 1024 → encoder → embedding → point/box → `sam_
 ## ✅ Stage 4 — WASM click-to-segment demo (DONE 2026-08-02)
 Encoder runs once per image (heavy), decoder per click (cheap, ~ms). Click → segment. Ship fp16.
 
-## ⏭ Stage 5 — training (focal + dice mask loss + IoU MSE) ; Stage 6 — GPU (cuBLAS seam)
+## ✅ Stage 5 — training (DONE 2026-08-02)
+`sam_loss.hpp` (focal+dice mask_loss, gradcheck 1.83e-4; sq_err IoU MSE) + `train_sam.cpp` (SAM recipe:
+supervise min-loss mask; Adam on 4.06M decoder params, encoder frozen). Synthetic: mask_loss 2.13->0.89.
+
+## ✅ Stage 6 — GPU notebook (DONE 2026-08-02; real Colab run pending)
+`colab_sam_gpu.ipynb`: build CPU + GPU (nvcc -DUSE_CUDA -lcublas, cuBLAS seam) + time + train. infer_sam
+/ train_sam verified c++17-clean (nvcc uses c++17). Real T4 run is the user's final step.
+
+## SAM ViT-B encoder (the other 'both' half)
+`net_vitb.hpp` + `export_vitb.py` + `m4_vitb.cpp`: plain ViT (patch16, embed768, 12 blocks, windowed 14
+with global at 2/5/8/11), abs pos_embed, **decomposed relative position embeddings** (MViTv2, new),
+neck. sam_vit_b.pth (~375MB, gitignored). Parity validating (slow: global blocks attend over 4096 tokens).
 
 ## Notes
 - B=1 throughout. embed 256, image embedding 64x64, input 1024, 4 mask tokens, 8 heads, tf depth 2.
