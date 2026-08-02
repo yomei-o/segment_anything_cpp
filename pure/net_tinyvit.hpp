@@ -37,6 +37,9 @@ inline TvitW load_tinyvit(const std::string& dir, bool fp16 = false) {
   return w;
 }
 
+// inference: break the autograd graph between steps so huge intermediates get freed (no backward here)
+inline Tensor tv_detach(const Tensor& x) { return from_data(x->shape, x->data, false); }
+
 // ---- layout helpers (B=1) ----
 inline Tensor tok2sp(const Tensor& x, int64_t C, int64_t H, int64_t W) {   // [H*W,C] -> [1,C,H,W]
   return reshape(transpose2d(x), {1, C, H, W});
@@ -54,7 +57,7 @@ inline Tensor mbconv(const Tensor& x, TvitW& w, int64_t Cin, int64_t hidden) {
   Tensor h = gelu(conv2d(x, c1w, c1b, 1, 0, 1));
   h = gelu(conv2d(h, c2w, c2b, 1, 1, hidden));
   h = conv2d(h, c3w, c3b, 1, 0, 1);
-  return gelu(add(x, h));
+  return tv_detach(gelu(add(x, h)));
 }
 
 // ---- PatchMerging: spatial [1,C,H,W] -> conv1(1x1)->act->conv2(dw3x3,stride)->act->conv3(1x1) -> tokens ----
@@ -65,7 +68,7 @@ inline Tensor patch_merging(const Tensor& x, TvitW& w, int64_t Cin, int64_t Cout
   Tensor h = gelu(conv2d(x, c1w, c1b, 1, 0, 1));
   h = gelu(conv2d(h, c2w, c2b, stride, 1, Cout));
   h = conv2d(h, c3w, c3b, 1, 0, 1);
-  return sp2tok(h);
+  return tv_detach(sp2tok(h));
 }
 
 // ---- windowed attention on a single window [N,C] with pre-expanded bias ab[heads,N,N], key_dim=32 ----
@@ -152,7 +155,7 @@ inline Tensor tinyvit_forward(const Tensor& img, TvitW& w) {
   // patch_embed: conv(3->32,s2,p1)->gelu->conv(32->64,s2,p1) -> [1,64,256,256]
   Tensor pe0w = w.take({32, 3, 3, 3}), pe0b = w.take({32});
   Tensor pe2w = w.take({64, 32, 3, 3}), pe2b = w.take({64});
-  Tensor x = conv2d(gelu(conv2d(img, pe0w, pe0b, 2, 1, 1)), pe2w, pe2b, 2, 1, 1);   // [1,64,256,256]
+  Tensor x = tv_detach(conv2d(gelu(conv2d(img, pe0w, pe0b, 2, 1, 1)), pe2w, pe2b, 2, 1, 1));   // [1,64,256,256]
   // stage 0: ConvLayer 2x MBConv (dim64, hidden256), spatial, then PatchMerging 64->128 stride2
   g_tv_pe = x;
   for (int i = 0; i < 2; ++i) x = mbconv(x, w, 64, 256);
