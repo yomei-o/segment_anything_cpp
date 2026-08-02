@@ -1,0 +1,15 @@
+build/
+*.exe
+*.obj
+*.lib
+*.exp
+*.pdb
+*.o
+*.onnx
+*.pt
+*.pth
+__pycache__/
+/*.png
+pure/ref/*.bin
+pure/ref/mobile_sam.pt
+weights/
