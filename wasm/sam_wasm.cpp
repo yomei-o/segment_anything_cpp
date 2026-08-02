@@ -26,6 +26,7 @@ EMSCRIPTEN_KEEPALIVE float fn_iou(int i) { return (i >= 0 && i < 3) ? g_iou[i] :
 
 EMSCRIPTEN_KEEPALIVE int fn_encode(unsigned char* rgba, int w, int h) {
   if (!g_tw) fn_ready();
+  g_tw->off = 0;                       // rewind the weight reader (persists across calls)
   g_W0 = w; g_H0 = h;
   const int S = 1024; g_scale = (float)S / std::max(w, h);
   int newW = (int)std::round(w * g_scale), newH = (int)std::round(h * g_scale);
@@ -46,6 +47,7 @@ EMSCRIPTEN_KEEPALIVE int fn_encode(unsigned char* rgba, int w, int h) {
 // click in original-image pixels -> best 256x256 mask logits (aligned to the padded 1024 canvas)
 EMSCRIPTEN_KEEPALIVE float* fn_decode(float px, float py) {
   if (!g_emb) return g_mask.data();
+  g_sw->off = 0; g_sw->ti = 0; g_sw->cache.clear();   // rewind reader + drop the per-call param cache
   std::vector<float> pts = {px * g_scale, py * g_scale}; std::vector<int> labels = {1};
   SamOut o = sam_decode(g_emb, pts, labels, *g_sw);
   int best = 1; for (int i = 2; i <= 3; ++i) if (o.iou->data[i] > o.iou->data[best]) best = i;

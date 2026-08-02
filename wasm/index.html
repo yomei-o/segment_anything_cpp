@@ -74,30 +74,37 @@ $('enc').onclick = async () => {
   $('status').textContent = `encoded in ${((performance.now()-t)/1000).toFixed(1)} s — now click an object`;
 };
 
-cv.onclick = e => {
+let busy = false;
+cv.onclick = async e => {
   if (!encoded) { $('status').textContent = 'encode the image first'; return; }
+  if (busy) return; busy = true;
   const r = cv.getBoundingClientRect();
   const ox = (e.clientX - r.left) / r.width * W0, oy = (e.clientY - r.top) / r.height * H0;
-  const t = performance.now();
-  const dp = M.ccall('fn_decode','number',['number','number'],[ox, oy]);
-  const mask = M.HEAPF32.subarray(dp/4, dp/4 + 256*256);
-  // overlay: base image + red where mask logit > 0, at original resolution
-  const out = ctx.createImageData(W0, H0); out.data.set(base.data);
-  for (let y = 0; y < H0; y++) for (let x = 0; x < W0; x++) {
-    const mx = Math.round((x + 0.5) * scale / 1024 * 256 - 0.5);
-    const my = Math.round((y + 0.5) * scale / 1024 * 256 - 0.5);
-    if (mx >= 0 && mx < 256 && my >= 0 && my < 256 && mask[my*256+mx] > 0) {
-      const i = (y*W0+x)*4;
-      out.data[i]   = out.data[i]*0.5 + 255*0.5;
-      out.data[i+1] = out.data[i+1]*0.5 + 40*0.5;
-      out.data[i+2] = out.data[i+2]*0.5 + 40*0.5;
+  $('status').textContent = 'segmenting… (a few seconds)';
+  await new Promise(r => setTimeout(r, 30));           // let the UI paint before the blocking call
+  try {
+    const t = performance.now();
+    const dp = M.ccall('fn_decode','number',['number','number'],[ox, oy]);
+    const H = M.HEAPF32;                                // re-read after the call (memory may have grown)
+    let fg = 0;
+    const out = ctx.createImageData(W0, H0); out.data.set(base.data);
+    for (let y = 0; y < H0; y++) for (let x = 0; x < W0; x++) {
+      const mx = Math.round((x + 0.5) * scale / 1024 * 256 - 0.5);
+      const my = Math.round((y + 0.5) * scale / 1024 * 256 - 0.5);
+      if (mx >= 0 && mx < 256 && my >= 0 && my < 256 && H[dp/4 + my*256+mx] > 0) {
+        const i = (y*W0+x)*4; fg++;
+        out.data[i]   = out.data[i]*0.5 + 255*0.5;
+        out.data[i+1] = out.data[i+1]*0.5 + 40*0.5;
+        out.data[i+2] = out.data[i+2]*0.5 + 40*0.5;
+      }
     }
-  }
-  ctx.putImageData(out, 0, 0);
-  // draw click marker
-  ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.arc(ox, oy, Math.max(3, W0/200), 0, 7); ctx.fill();
-  const iou = [0,1,2].map(i => M.ccall('fn_iou','number',['number'],[i]).toFixed(2));
-  $('status').textContent = `segmented in ${((performance.now()-t)/1000).toFixed(1)} s  ·  IoU ${iou.join(' / ')}`;
+    ctx.putImageData(out, 0, 0);
+    ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.arc(ox, oy, Math.max(3, W0/200), 0, 7); ctx.fill();
+    const iou = [0,1,2].map(i => M.ccall('fn_iou','number',['number'],[i]).toFixed(2));
+    $('status').textContent = `segmented in ${((performance.now()-t)/1000).toFixed(1)} s · ${(100*fg/(W0*H0)).toFixed(1)}% · IoU ${iou.join(' / ')}`;
+  } catch (err) {
+    $('status').textContent = 'decode error: ' + err.message; console.error(err);
+  } finally { busy = false; }
 };
 
 boot().catch(e => { $('status').textContent = 'error: ' + e.message; console.error(e); });
