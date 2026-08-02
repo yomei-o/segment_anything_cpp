@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Segment Anything (MobileSAM) — pure C++ / WASM click-to-segment</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #0d1117; color: #e6edf3; }
+  header { padding: 16px 20px; border-bottom: 1px solid #30363d; }
+  h1 { margin: 0; font-size: 18px; } h1 small { color: #8b949e; font-weight: normal; font-size: 13px; }
+  .bar { padding: 12px 20px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid #30363d; }
+  button { background: #238636; color: #fff; border: 0; padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  button:disabled { background: #30363d; color: #8b949e; cursor: default; }
+  input[type=file] { color: #8b949e; font-size: 13px; }
+  #status { color: #8b949e; font-size: 13px; margin-left: auto; }
+  .wrap { padding: 20px; }
+  canvas { max-width: 100%; border: 1px solid #30363d; border-radius: 8px; cursor: crosshair; background: #000; }
+  .hint { color: #8b949e; font-size: 13px; padding: 0 20px 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Segment Anything · MobileSAM &nbsp;<small>pure-C++ TinyViT encoder + mask decoder, compiled to WebAssembly — click to segment, no server</small></h1>
+</header>
+<div class="bar">
+  <input type="file" id="file" accept="image/*">
+  <button id="enc" disabled>Encode image</button>
+  <span id="status">loading model…</span>
+</div>
+<div class="hint">1) pick an image → 2) <b>Encode image</b> (runs the ViT encoder once, ~15–60 s) → 3) <b>click</b> any object to segment it (fast).</div>
+<div class="wrap"><canvas id="cv"></canvas></div>
+
+<script src="sam.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let M = null, W0 = 0, H0 = 0, scale = 1, encoded = false, base = null;
+const cv = $('cv'), ctx = cv.getContext('2d');
+
+async function boot() {
+  M = await createSam();
+  $('status').textContent = 'downloading weights (~22 MB)…';
+  const files = ['tvit_weights_fp16.bin','weights_fp16.bin','config.txt','tvit_config.txt'];
+  M.FS.mkdir('/sam');
+  await Promise.all(files.map(f => fetch('sam/'+f).then(r => r.arrayBuffer())
+    .then(b => M.FS.writeFile('/sam/'+f, new Uint8Array(b)))));
+  M.ccall('fn_ready','number',[],[]);
+  $('status').textContent = 'ready — pick an image';
+}
+
+$('file').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const img = new Image();
+  img.onload = () => {
+    W0 = img.width; H0 = img.height; cv.width = W0; cv.height = H0;
+    ctx.drawImage(img, 0, 0);
+    base = ctx.getImageData(0, 0, W0, H0);
+    encoded = false; $('enc').disabled = false;
+    $('status').textContent = 'image loaded — click Encode';
+  };
+  img.src = URL.createObjectURL(f);
+};
+
+$('enc').onclick = async () => {
+  if (!M || !base) return;
+  $('enc').disabled = true; $('status').textContent = 'encoding (ViT, one-time)… this can take a while';
+  await new Promise(r => setTimeout(r, 30));           // let the UI paint
+  const t = performance.now();
+  const rgba = base.data;                              // Uint8ClampedArray W0*H0*4
+  const p = M._malloc(rgba.length); M.HEAPU8.set(rgba, p);
+  M.ccall('fn_encode','number',['number','number','number'],[p, W0, H0]);
+  M._free(p);
+  scale = M.ccall('fn_scale','number',[],[]);
+  encoded = true;
+  $('status').textContent = `encoded in ${((performance.now()-t)/1000).toFixed(1)} s — now click an object`;
+};
+
+cv.onclick = e => {
+  if (!encoded) { $('status').textContent = 'encode the image first'; return; }
+  const r = cv.getBoundingClientRect();
+  const ox = (e.clientX - r.left) / r.width * W0, oy = (e.clientY - r.top) / r.height * H0;
+  const t = performance.now();
+  const dp = M.ccall('fn_decode','number',['number','number'],[ox, oy]);
+  const mask = M.HEAPF32.subarray(dp/4, dp/4 + 256*256);
+  // overlay: base image + red where mask logit > 0, at original resolution
+  const out = ctx.createImageData(W0, H0); out.data.set(base.data);
+  for (let y = 0; y < H0; y++) for (let x = 0; x < W0; x++) {
+    const mx = Math.round((x + 0.5) * scale / 1024 * 256 - 0.5);
+    const my = Math.round((y + 0.5) * scale / 1024 * 256 - 0.5);
+    if (mx >= 0 && mx < 256 && my >= 0 && my < 256 && mask[my*256+mx] > 0) {
+      const i = (y*W0+x)*4;
+      out.data[i]   = out.data[i]*0.5 + 255*0.5;
+      out.data[i+1] = out.data[i+1]*0.5 + 40*0.5;
+      out.data[i+2] = out.data[i+2]*0.5 + 40*0.5;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+  // draw click marker
+  ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.arc(ox, oy, Math.max(3, W0/200), 0, 7); ctx.fill();
+  const iou = [0,1,2].map(i => M.ccall('fn_iou','number',['number'],[i]).toFixed(2));
+  $('status').textContent = `segmented in ${((performance.now()-t)/1000).toFixed(1)} s  ·  IoU ${iou.join(' / ')}`;
+};
+
+boot().catch(e => { $('status').textContent = 'error: ' + e.message; console.error(e); });
+</script>
+</body>
+</html>
